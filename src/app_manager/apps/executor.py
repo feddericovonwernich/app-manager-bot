@@ -396,6 +396,56 @@ class AppExecutor:
                 error=str(e),
             )
 
+    async def git_reset(self, repo_dir: Path, commits: int = 1) -> ExecutionResult:
+        """Reset git repo by X commits (git reset --hard HEAD~X)."""
+        logger.info("Resetting git repo", repo_dir=str(repo_dir), commits=commits)
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git", "reset", "--hard", f"HEAD~{commits}",
+                cwd=str(repo_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=GIT_PULL_TIMEOUT,
+            )
+
+            output = stdout.decode("utf-8", errors="replace")
+            success = process.returncode == 0
+
+            logger.info(
+                "Git reset completed",
+                repo_dir=str(repo_dir),
+                commits=commits,
+                success=success,
+                return_code=process.returncode,
+            )
+
+            return ExecutionResult(
+                success=success,
+                output=output,
+                return_code=process.returncode,
+            )
+
+        except asyncio.TimeoutError:
+            logger.error("Git reset timed out", repo_dir=str(repo_dir))
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Git reset timed out after {GIT_PULL_TIMEOUT} seconds",
+            )
+
+        except Exception as e:
+            logger.exception("Git reset failed", repo_dir=str(repo_dir))
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=str(e),
+            )
+
     def self_restart(self, script_path: Path) -> None:
         """Trigger a self-restart via detached subprocess.
 

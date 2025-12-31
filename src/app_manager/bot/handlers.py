@@ -86,6 +86,8 @@ class BotHandlers:
 *Admin Commands:*
 /update [app] - Git pull and restart (admin only)
 /branch <branch> [app] - Switch git branch (admin only)
+/rollback <n> [app] - Reset n commits and restart (admin only)
+/self\\_rollback <n> - Reset n commits on this bot (admin only)
 /self\\_logs - Show this bot's logs (admin only)
 /self\\_restart - Restart this bot (admin only)
 /self\\_update - Update and restart this bot (admin only)
@@ -369,6 +371,117 @@ _Note: If [app] is omitted, the default app is used._
             f"{status_icon} *Branch switch: {app.name}*\n\n```\n{result}\n```",
             parse_mode="Markdown",
         )
+
+    @require_admin
+    async def rollback_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /rollback - reset X commits and restart app (admin only)."""
+        args = context.args or []
+
+        if len(args) < 1:
+            await update.message.reply_text(
+                "Usage: /rollback <number_of_commits> [app]\n\n"
+                "Example: /rollback 1\n"
+                "Example: /rollback 2 myapp\n"
+                "This will run `git reset --hard HEAD~X` and restart the app."
+            )
+            return
+
+        try:
+            commits = int(args[0])
+            if commits < 1:
+                raise ValueError("Must be at least 1")
+        except ValueError:
+            await update.message.reply_text("Error: Please provide a valid positive number.")
+            return
+
+        app_name = args[1] if len(args) > 1 else None
+
+        try:
+            app = self.app_registry.get(app_name)
+        except AppNotFoundError as e:
+            await update.message.reply_text(f"Error: {e}")
+            return
+
+        await update.message.reply_text(
+            f"Rolling back `{app.name}` by {commits} commit(s)...\n\n"
+            f"1️⃣ Running `git reset --hard HEAD~{commits}`...",
+            parse_mode="Markdown",
+        )
+
+        result = await self.executor.git_reset(app.path, commits)
+
+        if not result.success:
+            await update.message.reply_text(
+                f"❌ *Git reset failed:*\n\n```\n{result}\n```",
+                parse_mode="Markdown",
+            )
+            return
+
+        await update.message.reply_text(
+            f"✅ Git reset complete:\n```\n{result.output}\n```\n\n"
+            "2️⃣ Restarting...",
+            parse_mode="Markdown",
+        )
+
+        restart_result = await self.executor.run(app, "restart")
+
+        status_icon = "✅" if restart_result.success else "❌"
+        await update.message.reply_text(
+            f"{status_icon} *Rollback complete: {app.name}*\n\n```\n{restart_result}\n```",
+            parse_mode="Markdown",
+        )
+
+    @require_admin
+    async def self_rollback_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /self_rollback - reset X commits and restart (admin only)."""
+        args = context.args or []
+
+        if len(args) < 1:
+            await update.message.reply_text(
+                "Usage: /self_rollback <number_of_commits>\n\n"
+                "Example: /self_rollback 1\n"
+                "This will run `git reset --hard HEAD~1` and restart the bot."
+            )
+            return
+
+        try:
+            commits = int(args[0])
+            if commits < 1:
+                raise ValueError("Must be at least 1")
+        except ValueError:
+            await update.message.reply_text("Error: Please provide a valid positive number.")
+            return
+
+        await update.message.reply_text(
+            f"Rolling back {commits} commit(s)...\n\n"
+            f"1️⃣ Running `git reset --hard HEAD~{commits}`...",
+            parse_mode="Markdown",
+        )
+
+        result = await self.executor.git_reset(self.settings.bot_dir, commits)
+
+        if not result.success:
+            await update.message.reply_text(
+                f"❌ *Git reset failed:*\n\n```\n{result}\n```",
+                parse_mode="Markdown",
+            )
+            return
+
+        await update.message.reply_text(
+            f"✅ Git reset complete:\n```\n{result.output}\n```\n\n"
+            "2️⃣ Restarting in 2 seconds...",
+            parse_mode="Markdown",
+        )
+
+        self.executor.self_restart(self.settings.bot_script)
 
     @require_admin
     async def self_logs_command(
