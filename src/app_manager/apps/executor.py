@@ -1,6 +1,7 @@
 """Application executor - runs commands via subprocess."""
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import structlog
@@ -135,13 +136,112 @@ class AppExecutor:
                 error=str(e),
             )
 
+    async def git_checkout(self, app: AppConfig, branch: str) -> ExecutionResult:
+        """Switch to a different git branch in app directory."""
+        logger.info("Switching branch", app=app.name, branch=branch, path=str(app.path))
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git", "checkout", "--force", branch,
+                cwd=str(app.path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=GIT_PULL_TIMEOUT,
+            )
+
+            output = stdout.decode("utf-8", errors="replace")
+            success = process.returncode == 0
+
+            logger.info(
+                "Branch switch completed",
+                app=app.name,
+                branch=branch,
+                success=success,
+                return_code=process.returncode,
+            )
+
+            return ExecutionResult(
+                success=success,
+                output=output,
+                return_code=process.returncode,
+            )
+
+        except asyncio.TimeoutError:
+            logger.error("Branch switch timed out", app=app.name, branch=branch)
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Branch switch timed out after {GIT_PULL_TIMEOUT} seconds",
+            )
+
+        except Exception as e:
+            logger.exception("Branch switch failed", app=app.name, branch=branch)
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=str(e),
+            )
+
+    async def git_fetch(self, app: AppConfig) -> ExecutionResult:
+        """Run git fetch in app directory."""
+        logger.info("Running git fetch", app=app.name, path=str(app.path))
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git", "fetch",
+                cwd=str(app.path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=GIT_PULL_TIMEOUT,
+            )
+
+            output = stdout.decode("utf-8", errors="replace")
+            success = process.returncode == 0
+
+            logger.info(
+                "Git fetch completed",
+                app=app.name,
+                success=success,
+                return_code=process.returncode,
+            )
+
+            return ExecutionResult(
+                success=success,
+                output=output,
+                return_code=process.returncode,
+            )
+
+        except asyncio.TimeoutError:
+            logger.error("Git fetch timed out", app=app.name)
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Git fetch timed out after {GIT_PULL_TIMEOUT} seconds",
+            )
+
+        except Exception as e:
+            logger.exception("Git fetch failed", app=app.name)
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=str(e),
+            )
+
     async def git_pull(self, app: AppConfig) -> ExecutionResult:
         """Run git pull in app directory."""
         logger.info("Running git pull", app=app.name, path=str(app.path))
 
         try:
             process = await asyncio.create_subprocess_exec(
-                "git", "pull",
+                "git", "pull", "--stat",
                 cwd=str(app.path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -251,3 +351,120 @@ class AppExecutor:
             truncated = truncated[first_newline + 1:]
 
         return f"...(truncated)...\n{truncated}"
+
+    async def read_log_file(
+        self,
+        log_path: Path,
+        lines: int = LOG_LINES_DEFAULT,
+    ) -> ExecutionResult:
+        """Read recent log lines from any log file."""
+        logger.info("Reading log file", log_file=str(log_path), lines=lines)
+
+        if not log_path.exists():
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Log file not found: {log_path}",
+            )
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "tail", "-n", str(lines), str(log_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=10,
+            )
+
+            output = stdout.decode("utf-8", errors="replace")
+            output = self._truncate_output(output)
+
+            return ExecutionResult(
+                success=True,
+                output=output,
+                return_code=process.returncode,
+            )
+
+        except Exception as e:
+            logger.exception("Failed to read log file", log_file=str(log_path))
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=str(e),
+            )
+
+    def self_restart(self, script_path: Path) -> None:
+        """Trigger a self-restart via detached subprocess.
+
+        Spawns a background process that waits 2 seconds, then calls
+        the restart script. This allows the current process to exit
+        gracefully while ensuring a new instance starts.
+        """
+        logger.info("Triggering self-restart", script=str(script_path))
+
+        # Spawn detached process: sleep 2 && /path/to/run.sh restart
+        subprocess.Popen(
+            ["bash", "-c", f"sleep 2 && {script_path} restart"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    async def self_update(self, bot_dir: Path, script_path: Path) -> ExecutionResult:
+        """Git pull the bot repo and trigger restart.
+
+        Returns the git pull result. If successful, also triggers
+        a self-restart after a 2-second delay.
+        """
+        logger.info("Self-updating bot", bot_dir=str(bot_dir))
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git", "pull", "--stat",
+                cwd=str(bot_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=GIT_PULL_TIMEOUT,
+            )
+
+            output = stdout.decode("utf-8", errors="replace")
+            success = process.returncode == 0
+
+            logger.info(
+                "Self-update git pull completed",
+                success=success,
+                return_code=process.returncode,
+            )
+
+            if success:
+                # Trigger restart after successful pull
+                self.self_restart(script_path)
+
+            return ExecutionResult(
+                success=success,
+                output=output,
+                return_code=process.returncode,
+            )
+
+        except asyncio.TimeoutError:
+            logger.error("Self-update git pull timed out")
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Git pull timed out after {GIT_PULL_TIMEOUT} seconds",
+            )
+
+        except Exception as e:
+            logger.exception("Self-update failed")
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=str(e),
+            )

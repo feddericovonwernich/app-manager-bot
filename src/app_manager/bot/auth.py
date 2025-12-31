@@ -41,11 +41,7 @@ def require_auth(func: Callable) -> Callable:
                     username=user.username,
                     command=update.message.text if update.message else None,
                 )
-                await update.message.reply_text(
-                    "You are not authorized to use this bot.\n"
-                    "Contact an administrator if you need access."
-                )
-                return
+                return  # Silent - no response to unauthorized users
 
             logger.info(
                 "Authorized command",
@@ -84,10 +80,7 @@ def require_admin(func: Callable) -> Callable:
                 username=user.username,
                 command=update.message.text if update.message else None,
             )
-            await update.message.reply_text(
-                "This command requires admin privileges."
-            )
-            return
+            return  # Silent - no response to non-admins
 
         logger.info(
             "Admin command executed",

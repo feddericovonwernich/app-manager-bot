@@ -44,6 +44,7 @@ class BotHandlers:
 
         return "\n".join(lines)
 
+    @require_auth
     async def start_command(
         self,
         update: Update,
@@ -60,6 +61,7 @@ class BotHandlers:
         )
         await update.message.reply_text(welcome)
 
+    @require_auth
     async def help_command(
         self,
         update: Update,
@@ -83,6 +85,10 @@ class BotHandlers:
 
 *Admin Commands:*
 /update [app] - Git pull and restart (admin only)
+/branch <branch> [app] - Switch git branch (admin only)
+/self\\_logs - Show this bot's logs (admin only)
+/self\\_restart - Restart this bot (admin only)
+/self\\_update - Update and restart this bot (admin only)
 
 _Note: If [app] is omitted, the default app is used._
 """
@@ -281,22 +287,37 @@ _Note: If [app] is omitted, the default app is used._
             return
 
         await update.message.reply_text(
-            f"Updating `{app.name}`...\n\n1️⃣ Running git pull...",
+            f"Updating `{app.name}`...\n\n1️⃣ Running git fetch...",
             parse_mode="Markdown",
         )
 
-        # Git pull
-        git_result = await self.executor.git_pull(app)
+        # Git fetch
+        fetch_result = await self.executor.git_fetch(app)
 
-        if not git_result.success:
+        if not fetch_result.success:
             await update.message.reply_text(
-                f"❌ *Git pull failed:*\n\n```\n{git_result}\n```",
+                f"❌ *Git fetch failed:*\n\n```\n{fetch_result}\n```",
                 parse_mode="Markdown",
             )
             return
 
         await update.message.reply_text(
-            f"✅ Git pull complete:\n```\n{git_result.output}\n```\n\n2️⃣ Restarting...",
+            f"✅ Git fetch complete\n\n2️⃣ Running git pull...",
+            parse_mode="Markdown",
+        )
+
+        # Git pull
+        pull_result = await self.executor.git_pull(app)
+
+        if not pull_result.success:
+            await update.message.reply_text(
+                f"❌ *Git pull failed:*\n\n```\n{pull_result}\n```",
+                parse_mode="Markdown",
+            )
+            return
+
+        await update.message.reply_text(
+            f"✅ Git pull complete:\n```\n{pull_result.output}\n```\n\n3️⃣ Restarting...",
             parse_mode="Markdown",
         )
 
@@ -308,3 +329,108 @@ _Note: If [app] is omitted, the default app is used._
             f"{status_icon} *Update complete: {app.name}*\n\n```\n{restart_result}\n```",
             parse_mode="Markdown",
         )
+
+    @require_admin
+    async def branch_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /branch command - switch git branch (admin only)."""
+        args = context.args or []
+
+        if len(args) < 1:
+            await update.message.reply_text(
+                "Usage: /branch <branch_name> [app]\n\n"
+                "Example: /branch main\n"
+                "Example: /branch develop myapp"
+            )
+            return
+
+        # First arg is branch, second (optional) is app name
+        branch_name = args[0]
+        app_name = args[1] if len(args) > 1 else None
+
+        try:
+            app = self.app_registry.get(app_name)
+        except AppNotFoundError as e:
+            await update.message.reply_text(f"Error: {e}")
+            return
+
+        await update.message.reply_text(
+            f"Switching `{app.name}` to branch `{branch_name}`...",
+            parse_mode="Markdown",
+        )
+
+        result = await self.executor.git_checkout(app, branch_name)
+
+        status_icon = "✅" if result.success else "❌"
+        await update.message.reply_text(
+            f"{status_icon} *Branch switch: {app.name}*\n\n```\n{result}\n```",
+            parse_mode="Markdown",
+        )
+
+    @require_admin
+    async def self_logs_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /self_logs - show this bot's logs (admin only)."""
+        await update.message.reply_text(
+            "Fetching bot logs...",
+            parse_mode="Markdown",
+        )
+
+        result = await self.executor.read_log_file(self.settings.bot_log)
+
+        if result.success:
+            await update.message.reply_text(
+                f"*Bot Logs:*\n\n```\n{result.output}\n```",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(f"❌ Error: {result.error}")
+
+    @require_admin
+    async def self_restart_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /self_restart - restart this bot (admin only)."""
+        await update.message.reply_text(
+            "Restarting bot in 2 seconds...",
+            parse_mode="Markdown",
+        )
+
+        self.executor.self_restart(self.settings.bot_script)
+
+    @require_admin
+    async def self_update_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Handle /self_update - git pull and restart this bot (admin only)."""
+        await update.message.reply_text(
+            "Updating bot...\n\n1️⃣ Running git pull...",
+            parse_mode="Markdown",
+        )
+
+        result = await self.executor.self_update(
+            self.settings.bot_dir,
+            self.settings.bot_script,
+        )
+
+        if result.success:
+            await update.message.reply_text(
+                f"✅ Git pull complete:\n```\n{result.output}\n```\n\n"
+                "2️⃣ Restarting in 2 seconds...",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ *Git pull failed:*\n\n```\n{result}\n```",
+                parse_mode="Markdown",
+            )

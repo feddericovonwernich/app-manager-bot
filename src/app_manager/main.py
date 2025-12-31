@@ -34,6 +34,10 @@ def create_application(settings, app_registry) -> Application:
     app.add_handler(CommandHandler("logs", handlers.logs_command))
     app.add_handler(CommandHandler("build", handlers.build_command))
     app.add_handler(CommandHandler("update", handlers.update_command))
+    app.add_handler(CommandHandler("branch", handlers.branch_command))
+    app.add_handler(CommandHandler("self_logs", handlers.self_logs_command))
+    app.add_handler(CommandHandler("self_restart", handlers.self_restart_command))
+    app.add_handler(CommandHandler("self_update", handlers.self_update_command))
 
     return app
 

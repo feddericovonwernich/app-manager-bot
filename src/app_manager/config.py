@@ -1,5 +1,7 @@
 """Configuration management using pydantic-settings."""
 
+from pathlib import Path
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -70,6 +72,23 @@ class Settings(BaseSettings):
     def is_authorized(self, user_id: int) -> bool:
         """Check if user is authorized (admin or allowed)."""
         return user_id in self.all_authorized_users
+
+    @property
+    def bot_dir(self) -> Path:
+        """Get the bot's root directory (auto-detected from module location)."""
+        # This file is at src/app_manager/config.py
+        # Bot root is two levels up
+        return Path(__file__).parent.parent.parent
+
+    @property
+    def bot_script(self) -> Path:
+        """Get the bot's run script path."""
+        return self.bot_dir / "scripts" / "run.sh"
+
+    @property
+    def bot_log(self) -> Path:
+        """Get the bot's log file path."""
+        return Path("/tmp/app-manager-bot.log")
 
 
 def get_settings() -> Settings:
