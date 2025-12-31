@@ -1,0 +1,25 @@
+# Application Manager Bot - Apps Configuration
+# This file defines the applications that can be managed by the bot.
+
+# Default app to use when no app name is specified
+default_app: claude-workspaces
+
+apps:
+  - name: claude-workspaces
+    path: /home/fedderico/Repos/claude-workspaces
+    script: scripts/dev.sh
+    description: Telegram bot wrapping Claude Code CLI with Vue 3 dashboard
+
+    # Optional: Custom command mappings (defaults shown)
+    # cmd_start: start
+    # cmd_stop: stop
+    # cmd_restart: restart
+    # cmd_status: status
+    # cmd_logs: logs
+    # cmd_build: build
+
+# Example of adding another app:
+# - name: my-other-app
+#   path: /home/user/projects/my-other-app
+#   script: scripts/manage.sh
+#   description: Another application to manage
