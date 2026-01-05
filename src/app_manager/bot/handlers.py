@@ -360,9 +360,12 @@ _Note: If [app] is omitted, the default app is used._
             return
 
         await update.message.reply_text(
-            f"Switching `{app.name}` to branch `{branch_name}`...",
+            f"Fetching and switching `{app.name}` to branch `{branch_name}`...",
             parse_mode="Markdown",
         )
+
+        # Fetch first to ensure we have the latest remote branches
+        await self.executor.git_fetch(app)
 
         result = await self.executor.git_checkout(app, branch_name)
 
